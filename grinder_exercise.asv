@@ -93,7 +93,7 @@ else
 end
 
 
-% Sensor 1
+% -------- Observability test : Sensor 1 --------
 Sys1 = ss(A,B,C1,D);
 Qo1 = obsv(Sys1);
 ro1 = rank(Qo1);
