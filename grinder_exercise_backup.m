@@ -145,3 +145,130 @@ legend('Estimated x_2','Real x_2','Location','best');
 title("Observer (" + label + "): x_2")
 
 end
+
+
+%% Question 5: Sensor bias faults + Residuals (2 pole sets)
+
+Call = [C1; C2; C3];        % outputs we want residuals for (3 outputs)
+Cobs = C4;                  % measured outputs used by observer (y1 and y2)
+t = linspace(0,30,2000)';   u = u0*ones(size(t));
+
+% Fault definition (bias)
+bias1 = 0.5;   t1_on=5.8;  t1_off=6.4;     % sensor 1 (y1)
+bias2 = -0.25; t2_on=11.8; t2_off=12.4;    % sensor 2 (y2)
+
+% Plant simulation -> get x(t)
+[~,~,x] = lsim(ss(A,B,eye(2),0),u,t);
+
+% True outputs (3 outputs)
+y_true = (Call*x')';
+
+% Measured outputs (2 outputs) + add faults
+y_meas = (Cobs*x')';
+m = zeros(size(y_meas));
+m(t>=t1_on & t<=t1_off,1) = bias1;
+m(t>=t2_on & t<=t2_off,2) = bias2;
+y_faulty = y_meas + m;
+
+% Observer initial condition + inputs
+xhat0 = [1;0.5];
+uobs  = [u y_faulty];
+
+% Run observer for both pole sets
+for p = {[-1.5 -2.0], [-2.5 -3.0]}
+    poles = p{1};
+    L = place(A',Cobs',poles)';               % observer gain
+    sysobs = ss(A-L*Cobs,[B L],eye(2),0);     % xhat output
+    [~,~,xhat] = lsim(sysobs,uobs,t,xhat0);
+
+    res = y_true - (Call*xhat')';             % residuals
+
+    figure; plot(t,res); grid on; hold on;
+    xline(t1_on,'--'); xline(t1_off,'--');
+    xline(t2_on,'--'); xline(t2_off,'--');
+    title(sprintf('Residuals with faults - Poles{%.1f,%.1f}',poles(1),poles(2)));
+    legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
+end
+
+
+
+%% Question 6: Measurement noise (Gaussian) + Residuals (2 pole sets
+Call = [C1; C2; C3];        % outputs to plot residuals for
+Cobs = Call;                % sensors 1,2,3 are measured
+t = linspace(0,30,2000)';   u = u0*ones(size(t));
+
+% Simulate plant to get x(t) and true outputs
+[~,~,x] = lsim(ss(A,B,eye(2),0),u,t);
+y_true = (Call*x')';
+
+% Add same bias faults as Q5 (on outputs 1 and 2)
+m = zeros(size(y_true));
+m(t>=t1_on & t<=t1_off,1) = bias1;
+m(t>=t2_on & t<=t2_off,2) = bias2;
+
+% Add Gaussian noise b(t) ~ N(0,0.0225)
+rng(1);
+y_meas = y_true + m + sqrt(0.0225)*randn(size(y_true));
+
+% Run observer for both pole sets
+xhat0 = [1;0.5];
+for p = {[-1.5 -2.0], [-2.5 -3.0]}
+    poles = p{1};
+    L = place(A',Cobs',poles)';                 % observer gain
+    sysobs = ss(A-L*Cobs,[B L],eye(2),0);       % xhat output
+    [~,~,xhat] = lsim(sysobs,[u y_meas],t,xhat0);
+
+    res = y_true - (Call*xhat')';               % residuals
+
+    figure; plot(t,res); grid on; hold on;
+    xline(t1_on,'--'); xline(t1_off,'--');
+    xline(t2_on,'--'); xline(t2_off,'--');
+    title(sprintf('Residuals with faults + noise - Poles{%.1f,%.1f}',poles(1),poles(2)));
+    legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
+end
+
+%% Question 8: UIO for leak (unknown input) + show residuals insensitive to leak
+
+t = linspace(0,30,2000)';   u = u0*ones(size(t));
+
+% Leak: q(t)=0.5 between 8.8 and 12.4  -> f(t)=q/T2 (dq/dt=0)
+tL_on=8.8; tL_off=12.4; q0=0.5;
+f = q0/T2 * (t>=tL_on & t<=tL_off);
+
+C = [C1; C2; C3];           % 3 measured outputs
+F = [0; -1];                % leak enters x2 dynamics (loss)
+
+% --- Plant with unknown input (u and f) ---
+Sysxf = ss(A,[B F],eye(2),0);
+[~,~,x] = lsim(Sysxf,[u f],t);
+y = (C*x')';
+
+% Add sensor bias faults (same as Q5) to measurements
+m = zeros(size(y));
+m(t>=t1_on & t<=t1_off,1) = bias1;
+m(t>=t2_on & t<=t2_off,2) = bias2;
+y_meas = y + m;
+
+% --- UIO design (course formulas) ---
+N = diag([-1.5 -2.0]);          % chosen stable N
+E = -F*pinv(C*F);               % E = -F(CF)^+
+P = eye(2) + E*C;               % P = I + EC
+G = P*B;                        % G = PB
+K = (P*A - N)*pinv(C);          % K = (PA-N)C^+
+L = K + N*F*pinv(C*F);          % L = K + N F (CF)^+
+
+% --- UIO simulation: zdot = Nz + Gu + Ly,  xhat = z - Ey ---
+sysZ = ss(N,[G L],eye(2),0);    % inputs: [u ; y1 y2 y3]
+[~,~,z] = lsim(sysZ,[u y_meas],t,xhat0);
+xhat = z - y_meas*E';
+
+% Residuals: r = y_meas - yhat
+yhat = (C*xhat')';
+r = y_meas - yhat;
+
+figure; plot(t,r); grid on; hold on;
+xline(t1_on,'--'); xline(t1_off,'--');
+xline(t2_on,'--'); xline(t2_off,'--');
+xline(tL_on,':');  xline(tL_off,':');
+title('UIO residuals: sensor faults visible, leak rejected');
+legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
