@@ -145,3 +145,149 @@ legend('Estimated x_2','Real x_2','Location','best');
 title("Observer (" + label + "): x_2")
 
 end
+
+
+%% Question 5: Influence of a sensor fault (bias) + Residuals 
+Call = [C1; C2; C3];     % outputs we want residuals for (3 outputs)
+Cobs = C4;               % measured outputs used by observer (2 outputs: y1 and y2)
+
+% Fault definition (bias)
+t = linspace(0,30,2000)';          
+u = u0*ones(size(t));
+
+bias1 = 0.5;   t1_on=5.8;  t1_off=6.4;    % sensor 1
+bias2 = -0.25; t2_on=11.8; t2_off=12.4;   % sensor 2
+
+% Plant simulation -> get x(t)
+Sysx = ss(A,B,eye(2),0);
+[~,~,x] = lsim(Sysx,u,t);
+
+% True outputs (3 outputs)
+y_true = (Call*x')';
+
+% Measured outputs (2 outputs) + add faults
+y_meas = (Cobs*x')';
+m = zeros(size(y_meas));
+m(t>=t1_on & t<=t1_off,1) = bias1;
+m(t>=t2_on & t<=t2_off,2) = bias2;
+y_faulty = y_meas + m;
+
+xhat0 = [1;0.5];
+
+%% --- Case 1 poles {-1.5,-2.0} ---
+p = [-1.5 -2.0];
+L = place(A',Cobs',p)';                  % observer gain
+sysobs = ss(A-L*Cobs,[B L],eye(2),0);    % observer system
+uobs = [u y_faulty];
+[~,~,xhat] = lsim(sysobs,uobs,t,xhat0);
+
+y_hat = (Call*xhat')';
+res = y_true - y_hat;
+
+figure;
+plot(t,res(:,1)); hold on; grid on;
+plot(t,res(:,2));
+plot(t,res(:,3));
+xline(t1_on,'--'); xline(t1_off,'--');
+xline(t2_on,'--'); xline(t2_off,'--');
+title('Residuals with faults - Poles{-1.5,-2.0}');
+legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
+
+%% --- Case 2 poles {-2.5,-3.0} ---
+p = [-2.5 -3.0];
+L = place(A',Cobs',p)';
+sysobs = ss(A-L*Cobs,[B L],eye(2),0);
+[~,~,xhat] = lsim(sysobs,uobs,t,xhat0);
+
+y_hat = (Call*xhat')';
+res = y_true - y_hat;
+
+figure;
+plot(t,res(:,1)); hold on; grid on;
+plot(t,res(:,2));
+plot(t,res(:,3));
+xline(t1_on,'--'); xline(t1_off,'--');
+xline(t2_on,'--'); xline(t2_off,'--');
+title('Residuals with faults - Poles{-2.5,-3.0}');
+legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
+
+
+%% Question 6: Influence of measurement noise (Gaussian) + Residuals
+
+% We keep the same faults as Q5 (bias on sensor 1 and 2),
+% and now add Gaussian measurement noise b(t) to sensors 1,2,3.
+
+Call = [C1; C2; C3];     % 3 outputs for residuals: [y1; y2; y3]
+Cobs = Call;             % now we assume sensors 1,2,3 are measured (as in statement)
+
+% Noise parameters
+var_b = 0.0225;
+sigma_b = sqrt(var_b);
+
+% Use SAME simulation time and input
+t = linspace(0,30,2000)';          
+u = u0*ones(size(t));
+
+% --- Plant simulation -> get x(t)
+Sysx = ss(A,B,eye(2),0);
+[~,~,x] = lsim(Sysx,u,t);
+
+% True outputs (3 outputs)
+y_true = (Call*x')';
+
+% --- Build sensor faults m(t) (only on sensor 1 and 2)
+m = zeros(size(y_true));                 % Nx3
+m(t>=t1_on & t<=t1_off,1) = bias1;       % bias on output 1
+m(t>=t2_on & t<=t2_off,2) = bias2;       % bias on output 2
+
+% --- Add measurement noise b(t) to all 3 sensors
+rng(1);                                  % for repeatable results (optional)
+b = sigma_b*randn(size(y_true));         % Nx3 Gaussian noise
+
+% Measured outputs with faults + noise
+y_meas = y_true + m + b;
+
+% Observer initial condition
+xhat0 = [1;0.5];
+
+%% --- Case 1 poles {-1.5,-2.0} ---
+p = [-1.5 -2.0];
+L = place(A',Cobs',p)';                    % observer gain
+
+% Observer system: xhatdot = (A-LC)xhat + Bu + L*y_meas
+sysobs = ss(A-L*Cobs,[B L],eye(2),0);
+
+uobs = [u y_meas];
+[~,~,xhat] = lsim(sysobs,uobs,t,xhat0);
+
+y_hat = (Call*xhat')';
+res = y_true - y_hat;
+
+figure;
+plot(t,res(:,1)); hold on; grid on;
+plot(t,res(:,2));
+plot(t,res(:,3));
+xline(t1_on,'--'); xline(t1_off,'--');
+xline(t2_on,'--'); xline(t2_off,'--');
+title('Residuals with faults + noise - Poles{-1.5,-2.0}');
+legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
+
+%% --- Case 2 poles {-2.5,-3.0} ---
+p = [-2.5 -3.0];
+L = place(A',Cobs',p)';
+
+sysobs = ss(A-L*Cobs,[B L],eye(2),0);
+
+[~,~,xhat] = lsim(sysobs,uobs,t,xhat0);
+
+y_hat = (Call*xhat')';
+res = y_true - y_hat;
+
+figure;
+plot(t,res(:,1)); hold on; grid on;
+plot(t,res(:,2));
+plot(t,res(:,3));
+xline(t1_on,'--'); xline(t1_off,'--');
+xline(t2_on,'--'); xline(t2_off,'--');
+title('Residuals with faults + noise - Poles{-2.5,-3.0}');
+legend('r1 (overall y)','r2 (x1)','r3 (x2)','Location','best');
